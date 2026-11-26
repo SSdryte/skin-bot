@@ -1,16 +1,17 @@
 """Telegram-бот: каждые N минут сканирует площадки и присылает новые выгодные сделки.
 
-1. Создайте бота у @BotFather, токен положите в файл .env:  TELEGRAM_TOKEN=123:ABC...
-2. python bot.py
+1. Создайте бота у @BotFather.
+2. python bot.py (или start_bot.bat) — при первом запуске бот попросит вставить токен и сохранит его в .env
 3. Напишите боту /start — он запомнит вас как владельца и будет слать сделки только вам.
 
 python bot.py --once — один проход (команды + проверка) и выход: так бот работает в GitHub Actions.
 """
-import html, json, os, sys, time, urllib.request
+import html, json, os, sys, time, urllib.error, urllib.request
 
 import skins
 
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
+ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 DEFAULTS = dict(games=["cs2", "dota2"], min_price=1.0, max_price=0.0, min_profit=10.0, max_profit=100.0,
                 min_sales=5, min_sell_qty=5, phases=0, interval=10, paused=0)
 HELP = """<b>Команды</b>
@@ -31,11 +32,10 @@ NOTE = ""  # в режиме --once сюда пишется, что команд
 
 
 def load_env():
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-    if os.path.exists(path):
-        for line in open(path, encoding="utf-8"):
+    if os.path.exists(ENV_PATH):
+        for line in open(ENV_PATH, encoding="utf-8"):
             k, _, v = line.strip().partition("=")
-            if k and not k.startswith("#"):
+            if k and v.strip() and not k.startswith("#"):  # пустое "TELEGRAM_TOKEN=" не считается токеном
                 os.environ.setdefault(k.strip(), v.strip())
 
 
@@ -218,11 +218,28 @@ def run_once():
         print("Владелец ещё не привязан — напишите боту /start")
 
 
+def ask_token():
+    """Первый запуск на компьютере: спросить токен, проверить его у Telegram и сохранить в .env."""
+    while True:
+        os.environ["TELEGRAM_TOKEN"] = input(
+            "Вставьте токен бота из чата с @BotFather (правый клик = вставить) и нажмите Enter:\n> ").strip()
+        try:
+            name = tg("getMe")["username"]
+            break
+        except urllib.error.HTTPError:  # 401/404 — Telegram не знает такой токен
+            print("Telegram не принял этот токен. Скопируйте его целиком и попробуйте ещё раз.")
+    with open(ENV_PATH, "a", encoding="utf-8") as f:
+        f.write(f"\nTELEGRAM_TOKEN={os.environ['TELEGRAM_TOKEN']}\n")
+    print(f"Токен сохранён в .env, бот @{name}")
+
+
 def main():
     load_env()
     sys.stdout.reconfigure(errors="replace")
     if not os.environ.get("TELEGRAM_TOKEN"):
-        sys.exit("Нет TELEGRAM_TOKEN. Создайте файл .env рядом с bot.py: TELEGRAM_TOKEN=токен_от_BotFather")
+        if "--once" in sys.argv or not sys.stdin.isatty():
+            sys.exit("Нет TELEGRAM_TOKEN. Создайте файл .env рядом с bot.py: TELEGRAM_TOKEN=токен_от_BotFather")
+        ask_token()
     skins.self_check()
     if "--once" in sys.argv:
         return run_once()
