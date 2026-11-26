@@ -1,0 +1,53 @@
+# Бесплатный "сервер": GitHub сам запускает бота каждые ~15 минут.
+# Нужен секрет репозитория TELEGRAM_TOKEN (Settings → Secrets and variables → Actions).
+# Необязательно: секрет OWNER_ID — ваш Telegram ID (бот пишет его на /start), чтобы бота никто не перехватил.
+name: skin-bot
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:  # кнопка "Run workflow" — запустить вручную
+
+permissions:
+  contents: read
+  actions: write  # хранить state.json в кэше и не давать GitHub выключить расписание
+
+concurrency:
+  group: skin-bot  # два запуска одновременно перепутали бы состояние
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      # state.json (владелец, фильтры, уже отправленные сделки) живёт в кэше между запусками
+      - uses: actions/cache/restore@v4
+        with:
+          path: state.json
+          key: state-${{ github.run_id }}
+          restore-keys: state-
+
+      - run: python bot.py --once
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          OWNER_ID: ${{ secrets.OWNER_ID }}
+
+      - if: always() && hashFiles('state.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: state.json
+          key: state-${{ github.run_id }}
+
+      # GitHub выключает расписание, если в репозитории 60 дней не было активности
+      - name: Keep schedule enabled
+        continue-on-error: true
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/bot.yml/enable"
+        env:
+          GH_TOKEN: ${{ github.token }}
