@@ -6,6 +6,8 @@ on:
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:  # кнопка "Run workflow" — запустить вручную
+  push:
+    branches: [main]  # обновили код — бот сразу перезапускается с новой версией
 
 permissions:
   contents: read
